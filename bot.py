@@ -6,12 +6,12 @@ from datetime import datetime
 
 # Configurações
 CONFIG = {
-    'aguardando_cargo_id': None,
-    'aprovado_cargo_id': None,
-    'canal_formulario_id': None,
-    'canal_aprovacao_id': None,
-    'log_channel_id': None,
-    'cargo_gerente_id': None,
+    'aguardando_cargo_id': '1422448963625287761',
+    'aprovado_cargo_id': '1421001020938522641',
+    'canal_formulario_id': '1423057145875792003',
+    'canal_aprovacao_id': '1423055315259363449',
+    'log_channel_id': '1423051035575848963',
+    'cargo_gerente_id': '1421001020955430985',
     'prefixo': '!'
 }
 
