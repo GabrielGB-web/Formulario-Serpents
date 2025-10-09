@@ -6,20 +6,17 @@ from datetime import datetime
 
 # CONFIGURAÇÕES - COLE OS IDs CORRETOS AQUI
 CONFIG = {
-    'aguardando_cargo_id': 1422448963625287761,  # ID do cargo "Aguardando Formulário"
-    'aprovado_cargo_id': 1421001020938522641,    # ID do cargo "Aprovado"
-    'canal_formulario_id': 1423057145875792003,  # ID do canal do formulário
-    'canal_aprovacao_id': 1423055315259363449,   # ID do canal de aprovação
-    'log_channel_id': 1423051035575848963,       # ID do canal de logs
-    'cargo_gerente_id': 1421001020955430985,     # ID do cargo de gerente
+    'aguardando_cargo_id': 1422448963625287761,
+    'aprovado_cargo_id': 1421001020938522641,
+    'canal_formulario_id': 1423057145875792003,
+    'canal_aprovacao_id': 1423055315259363449,
+    'log_channel_id': 1423051035575848963,
+    'cargo_gerente_id': 1421001020955430985,
     'prefixo': '!'
 }
 
-# Dados para relatório de recrutamento
-recrutamento_data = {}
+# Dados para formulários
 formularios_ativos = {}
-nicknames_cache = {}
-mensagem_botao_id = None
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=CONFIG['prefixo'], intents=intents)
@@ -30,13 +27,8 @@ class IniciarFormularioView(discord.ui.View):
 
     @discord.ui.button(label="📝 Preencher Formulário", style=discord.ButtonStyle.primary, custom_id="iniciar_formulario")
     async def iniciar_formulario(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Verifica se o usuário tem o cargo de aguardando
         user_roles = [role.id for role in interaction.user.roles]
         
-        print(f"Usuário {interaction.user.name} clicou no botão")
-        print(f"Cargos do usuário: {user_roles}")
-        print(f"Cargo aguardando: {CONFIG['aguardando_cargo_id']}")
-
         # Verifica se já foi aprovado
         if CONFIG['aprovado_cargo_id'] in user_roles:
             await interaction.response.send_message("✅ Você já foi aprovado!", ephemeral=True)
@@ -61,93 +53,139 @@ class IniciarFormularioView(discord.ui.View):
 
         # Inicia o formulário
         await interaction.response.send_message("📋 **INICIANDO FORMULÁRIO...**", ephemeral=True)
-
+        
+        # Cria o formulário
         formularios_ativos[interaction.user.id] = {
             'respostas': [],
-            'etapa': 1,
-            'interaction': interaction
+            'etapa': 0,
+            'canal': interaction.channel
         }
 
-        await enviar_pergunta_formulario(interaction.user, 1)
+        # Envia primeira pergunta
+        await enviar_pergunta_formulario(interaction.user)
 
-async def enviar_pergunta_formulario(usuario, etapa):
+async def enviar_pergunta_formulario(usuario):
     if usuario.id not in formularios_ativos:
         return
 
     formulario = formularios_ativos[usuario.id]
-    interaction = formulario['interaction']
+    etapa = formulario['etapa']
+    
+    perguntas = [
+        "🎮 **Qual seu Nome In-Game?**",
+        "🆔 **Qual seu ID do Jogo?**", 
+        "👥 **Qual o ID do seu Recrutador?**"
+    ]
+    
+    if etapa >= len(perguntas):
+        await finalizar_formulario(usuario)
+        return
 
     try:
-        if etapa == 1:
-            pergunta = "**Pergunta 1/3**\n\n🎮 **Qual seu Nome In-Game?**"
-        elif etapa == 2:
-            pergunta = "**Pergunta 2/3**\n\n🆔 **Qual seu ID do Jogo?**"
-        elif etapa == 3:
-            pergunta = "**Pergunta 3/3**\n\n👥 **Qual o ID do seu Recrutador?**"
-        else:
-            return
-
-        embed = discord.Embed(title="📋 FORMULÁRIO", description=pergunta, color=0x0099ff)
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
+        # Envia a pergunta atual via DM
+        try:
+            embed = discord.Embed(
+                title=f"📋 FORMULÁRIO (Pergunta {etapa + 1}/3)",
+                description=perguntas[etapa],
+                color=0x0099ff
+            )
+            dm_msg = await usuario.send(embed=embed)
+            
+            # Armazena a mensagem DM para referência
+            formulario['ultima_dm'] = dm_msg
+            
+        except discord.Forbidden:
+            # Se não consegue enviar DM, usa o canal original
+            canal = formulario['canal']
+            embed = discord.Embed(
+                title=f"📋 FORMULÁRIO (Pergunta {etapa + 1}/3)",
+                description=perguntas[etapa],
+                color=0x0099ff
+            )
+            await canal.send(f"{usuario.mention}", embed=embed, delete_after=300)
+        
+        # Aguarda resposta
+        await aguardar_resposta_formulario(usuario)
+        
     except Exception as e:
         print(f"Erro ao enviar pergunta: {e}")
         if usuario.id in formularios_ativos:
             del formularios_ativos[usuario.id]
 
-async def aguardar_resposta_formulario(usuario, canal):
+async def aguardar_resposta_formulario(usuario):
+    if usuario.id not in formularios_ativos:
+        return
+
+    def check(m):
+        # Verifica se a mensagem é do usuário e não é comando
+        return (m.author.id == usuario.id and 
+                not m.content.startswith(CONFIG['prefixo']) and
+                len(m.content.strip()) > 0)
+
+    try:
+        # Aguarda resposta por 5 minutos
+        resposta = await bot.wait_for('message', check=check, timeout=300)
+        
+        # Processa a resposta
+        formulario = formularios_ativos[usuario.id]
+        formulario['respostas'].append(resposta.content.strip())
+        formulario['etapa'] += 1
+        
+        # Tenta deletar a resposta do usuário se não for DM
+        try:
+            if not isinstance(resposta.channel, discord.DMChannel):
+                await resposta.delete()
+        except:
+            pass
+        
+        # Envia próxima pergunta ou finaliza
+        if formulario['etapa'] < 3:
+            await enviar_pergunta_formulario(usuario)
+        else:
+            await finalizar_formulario(usuario)
+            
+    except asyncio.TimeoutError:
+        if usuario.id in formularios_ativos:
+            del formularios_ativos[usuario.id]
+        try:
+            await usuario.send("⏰ **Formulário expirado!**\n\nVocê demorou muito para responder. Use o botão novamente para recomeçar.")
+        except:
+            pass
+
+async def finalizar_formulario(usuario):
     if usuario.id not in formularios_ativos:
         return
 
     formulario = formularios_ativos[usuario.id]
-    etapa_atual = formulario['etapa']
-
-    def check(m):
-        return m.author.id == usuario.id and m.channel.id == canal.id
-
-    try:
-        resposta = await bot.wait_for('message', check=check, timeout=300)
-        
-        # Tenta deletar a mensagem da resposta
+    
+    if len(formulario['respostas']) != 3:
         try:
-            await resposta.delete()
+            await usuario.send("❌ **Formulário incompleto!**\n\nUse o botão novamente para recomeçar.")
         except:
             pass
+        del formularios_ativos[usuario.id]
+        return
 
-        formulario['respostas'].append(resposta.content)
-        etapa_atual += 1
-        formulario['etapa'] = etapa_atual
-
-        if etapa_atual <= 3:
-            await enviar_pergunta_formulario(usuario, etapa_atual)
-            await aguardar_resposta_formulario(usuario, canal)
-        else:
-            await finalizar_formulario(usuario, canal, formulario)
-
-    except asyncio.TimeoutError:
-        if usuario.id in formularios_ativos:
-            del formularios_ativos[usuario.id]
-        await canal.send("⏰ Formulário expirado. Use o botão novamente.", delete_after=10)
-
-async def finalizar_formulario(usuario, canal, formulario):
     try:
-        if len(formulario['respostas']) != 3:
-            if usuario.id in formularios_ativos:
-                del formularios_ativos[usuario.id]
-            return
-
+        # Confirmação para o usuário
         embed = discord.Embed(title="✅ FORMULÁRIO ENVIADO!", color=0x00ff00)
         embed.add_field(name="🎮 Nome In-Game", value=formulario['respostas'][0], inline=True)
         embed.add_field(name="🆔 ID do Jogo", value=formulario['respostas'][1], inline=True)
         embed.add_field(name="👥 ID Recrutador", value=formulario['respostas'][2], inline=True)
+        embed.add_field(name="📊 Status", value="Aguardando aprovação...", inline=False)
+        
+        try:
+            await usuario.send(embed=embed)
+        except:
+            # Se não consegue enviar DM, usa o canal original
+            canal = formulario['canal']
+            await canal.send(f"{usuario.mention}", embed=embed, delete_after=10)
 
-        interaction = formulario['interaction']
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-        if usuario.id in formularios_ativos:
-            del formularios_ativos[usuario.id]
-
+        # Envia para aprovação
         await enviar_para_aprovacao(usuario, formulario['respostas'])
+        
+        # Limpa formulário
+        del formularios_ativos[usuario.id]
 
     except Exception as e:
         print(f"Erro ao finalizar formulário: {e}")
@@ -158,11 +196,16 @@ async def enviar_para_aprovacao(usuario, respostas):
     canal_aprovacao = bot.get_channel(CONFIG['canal_aprovacao_id'])
     if canal_aprovacao:
         try:
-            embed = discord.Embed(title="📋 NOVO FORMULÁRIO", color=0xffff00, timestamp=datetime.now())
+            embed = discord.Embed(
+                title="📋 NOVO FORMULÁRIO PARA APROVAÇÃO", 
+                color=0xffff00, 
+                timestamp=datetime.now()
+            )
             embed.add_field(name="👤 USUÁRIO", value=f"{usuario.mention} ({usuario.name})", inline=False)
             embed.add_field(name="🎮 Nome In-Game", value=respostas[0], inline=True)
             embed.add_field(name="🆔 ID do Jogo", value=respostas[1], inline=True)
             embed.add_field(name="👥 ID Recrutador", value=respostas[2], inline=True)
+            embed.add_field(name="🆔 ID Discord", value=usuario.id, inline=True)
 
             view = AprovacaoView(usuario.id, respostas[0], respostas[1], respostas[2])
             await canal_aprovacao.send(embed=embed, view=view)
@@ -212,7 +255,12 @@ class AprovacaoView(discord.ui.View):
 
             # Envia mensagem para o usuário
             try:
-                await usuario.send("🎉 **Parabéns! Seu formulário foi aprovado!**\n\nAgora você faz parte da nossa equipe!")
+                embed = discord.Embed(
+                    title="🎉 PARABÉNS!",
+                    description="Seu formulário foi **APROVADO**!\n\nAgora você faz parte da nossa equipe!",
+                    color=0x00ff00
+                )
+                await usuario.send(embed=embed)
             except:
                 pass
 
@@ -243,6 +291,17 @@ class AprovacaoView(discord.ui.View):
             await interaction.message.edit(embed=embed, view=None)
             
             await interaction.response.send_message("❌ Usuário reprovado e removido!", ephemeral=True)
+            
+            # Envia mensagem antes de kickar
+            try:
+                embed = discord.Embed(
+                    title="❌ FORMULÁRIO REPROVADO",
+                    description="Seu formulário foi reprovado pela nossa equipe.\n\nVocê será removido do servidor.",
+                    color=0xff0000
+                )
+                await usuario.send(embed=embed)
+            except:
+                pass
             
             # Kicka o usuário
             await usuario.kick(reason="Formulário reprovado")
@@ -327,7 +386,7 @@ async def criarbotao(ctx):
             )
             embed.add_field(
                 name="ℹ️ INSTRUÇÕES",
-                value="• Você deve ter o cargo 'Aguardando Formulário'\n• Preencha todas as informações corretamente\n• Aguarde a aprovação da equipe",
+                value="• Você deve ter o cargo 'Aguardando Formulário'\n• Preencha todas as informações corretamente\n• Aguarde a aprovação da equipe\n\n**⚠️ As respostas serão enviadas via DM**",
                 inline=False
             )
             
@@ -389,7 +448,6 @@ async def ajuda(ctx):
     await ctx.send(embed=embed)
 
 if __name__ == "__main__":
-    # Verifica se o token está configurado
     token = os.environ.get('DISCORD_TOKEN')
     if not token:
         print("❌ DISCORD_TOKEN não encontrado nas variáveis de ambiente!")
