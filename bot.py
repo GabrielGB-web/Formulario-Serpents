@@ -15,8 +15,9 @@ CONFIG = {
     'prefixo': '!'
 }
 
-# Dados para formulários
+# Dados para formulários e registros
 formularios_ativos = {}
+registro_membros = {}  # Para armazenar ID do jogo dos membros
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=CONFIG['prefixo'], intents=intents)
@@ -52,16 +53,13 @@ class IniciarFormularioView(discord.ui.View):
             return
 
         # Inicia o formulário
-        await interaction.response.send_message("📋 **INICIANDO FORMULÁRIO...**", ephemeral=True)
-        
-        # Cria o formulário
         formularios_ativos[interaction.user.id] = {
             'respostas': [],
             'etapa': 0,
-            'canal': interaction.channel
+            'interaction': interaction
         }
 
-        # Envia primeira pergunta
+        # Envia primeira pergunta via ephemeral
         await enviar_pergunta_formulario(interaction.user)
 
 async def enviar_pergunta_formulario(usuario):
@@ -70,11 +68,12 @@ async def enviar_pergunta_formulario(usuario):
 
     formulario = formularios_ativos[usuario.id]
     etapa = formulario['etapa']
+    interaction = formulario['interaction']
     
     perguntas = [
-        "🎮 **Qual seu Nome In-Game?**",
-        "🆔 **Qual seu ID do Jogo?**", 
-        "👥 **Qual o ID do seu Recrutador?**"
+        "🎮 **Qual seu Nome In-Game?**\n\n*Este será seu nickname no servidor*",
+        "🆔 **Qual seu ID do Jogo?**\n\n*Digite apenas números*", 
+        "👥 **Qual o ID do seu Recrutador?**\n\n*Digite apenas números*"
     ]
     
     if etapa >= len(perguntas):
@@ -82,73 +81,86 @@ async def enviar_pergunta_formulario(usuario):
         return
 
     try:
-        # Envia a pergunta atual via DM
-        try:
-            embed = discord.Embed(
-                title=f"📋 FORMULÁRIO (Pergunta {etapa + 1}/3)",
-                description=perguntas[etapa],
-                color=0x0099ff
-            )
-            dm_msg = await usuario.send(embed=embed)
-            
-            # Armazena a mensagem DM para referência
-            formulario['ultima_dm'] = dm_msg
-            
-        except discord.Forbidden:
-            # Se não consegue enviar DM, usa o canal original
-            canal = formulario['canal']
-            embed = discord.Embed(
-                title=f"📋 FORMULÁRIO (Pergunta {etapa + 1}/3)",
-                description=perguntas[etapa],
-                color=0x0099ff
-            )
-            await canal.send(f"{usuario.mention}", embed=embed, delete_after=300)
+        # Envia a pergunta atual via ephemeral
+        embed = discord.Embed(
+            title=f"📋 FORMULÁRIO (Pergunta {etapa + 1}/3)",
+            description=perguntas[etapa],
+            color=0x0099ff
+        )
+        
+        if etapa == 0:
+            # Primeira pergunta - usa response.send_message
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            # Próximas perguntas - usa followup.send
+            await interaction.followup.send(embed=embed, ephemeral=True)
         
         # Aguarda resposta
-        await aguardar_resposta_formulario(usuario)
+        await aguardar_resposta_formulario(usuario, interaction.channel)
         
     except Exception as e:
         print(f"Erro ao enviar pergunta: {e}")
         if usuario.id in formularios_ativos:
             del formularios_ativos[usuario.id]
 
-async def aguardar_resposta_formulario(usuario):
+async def aguardar_resposta_formulario(usuario, canal):
     if usuario.id not in formularios_ativos:
         return
 
     def check(m):
-        # Verifica se a mensagem é do usuário e não é comando
-        return (m.author.id == usuario.id and 
-                not m.content.startswith(CONFIG['prefixo']) and
-                len(m.content.strip()) > 0)
+        # Verifica se a mensagem é do usuário no canal correto e não é comando
+        is_correct_channel = m.channel.id == canal.id
+        is_correct_user = m.author.id == usuario.id
+        is_not_command = not m.content.startswith(CONFIG['prefixo'])
+        has_content = len(m.content.strip()) > 0
+        
+        return is_correct_channel and is_correct_user and is_not_command and has_content
 
     try:
         # Aguarda resposta por 5 minutos
         resposta = await bot.wait_for('message', check=check, timeout=300)
         
-        # Processa a resposta
+        # Validações específicas por etapa
         formulario = formularios_ativos[usuario.id]
+        etapa = formulario['etapa']
+        
+        if etapa == 1:  # Valida ID do Jogo (apenas números)
+            if not resposta.content.strip().isdigit():
+                await canal.send("❌ **ID do Jogo deve conter apenas números!** Tente novamente:", delete_after=10)
+                return await aguardar_resposta_formulario(usuario, canal)
+                
+        elif etapa == 2:  # Valida ID do Recrutador (apenas números)
+            if not resposta.content.strip().isdigit():
+                await canal.send("❌ **ID do Recrutador deve conter apenas números!** Tente novamente:", delete_after=10)
+                return await aguardar_resposta_formulario(usuario, canal)
+        
+        # Processa a resposta
         formulario['respostas'].append(resposta.content.strip())
         formulario['etapa'] += 1
         
-        # Tenta deletar a resposta do usuário se não for DM
+        # Tenta deletar a resposta do usuário
         try:
-            if not isinstance(resposta.channel, discord.DMChannel):
-                await resposta.delete()
+            await resposta.delete()
         except:
             pass
         
-        # Envia próxima pergunta ou finaliza
+        # Envia confirmação ephemeral
+        interaction = formulario['interaction']
         if formulario['etapa'] < 3:
+            confirmacao = f"✅ **Resposta {formulario['etapa']}/3 registrada!**"
+            await interaction.followup.send(confirmacao, ephemeral=True)
             await enviar_pergunta_formulario(usuario)
         else:
+            confirmacao = f"✅ **Resposta {formulario['etapa']}/3 registrada!**\n\nEnviando formulário..."
+            await interaction.followup.send(confirmacao, ephemeral=True)
             await finalizar_formulario(usuario)
             
     except asyncio.TimeoutError:
         if usuario.id in formularios_ativos:
             del formularios_ativos[usuario.id]
         try:
-            await usuario.send("⏰ **Formulário expirado!**\n\nVocê demorou muito para responder. Use o botão novamente para recomeçar.")
+            interaction = formularios_ativos[usuario.id]['interaction']
+            await interaction.followup.send("⏰ **Formulário expirado!** Você demorou muito para responder.", ephemeral=True)
         except:
             pass
 
@@ -160,26 +172,23 @@ async def finalizar_formulario(usuario):
     
     if len(formulario['respostas']) != 3:
         try:
-            await usuario.send("❌ **Formulário incompleto!**\n\nUse o botão novamente para recomeçar.")
+            interaction = formulario['interaction']
+            await interaction.followup.send("❌ **Formulário incompleto!** Use o botão novamente para recomeçar.", ephemeral=True)
         except:
             pass
         del formularios_ativos[usuario.id]
         return
 
     try:
-        # Confirmação para o usuário
+        # Confirmação para o usuário via ephemeral
         embed = discord.Embed(title="✅ FORMULÁRIO ENVIADO!", color=0x00ff00)
         embed.add_field(name="🎮 Nome In-Game", value=formulario['respostas'][0], inline=True)
         embed.add_field(name="🆔 ID do Jogo", value=formulario['respostas'][1], inline=True)
         embed.add_field(name="👥 ID Recrutador", value=formulario['respostas'][2], inline=True)
-        embed.add_field(name="📊 Status", value="Aguardando aprovação...", inline=False)
+        embed.add_field(name="📊 Status", value="Aguardando aprovação da equipe...", inline=False)
         
-        try:
-            await usuario.send(embed=embed)
-        except:
-            # Se não consegue enviar DM, usa o canal original
-            canal = formulario['canal']
-            await canal.send(f"{usuario.mention}", embed=embed, delete_after=10)
+        interaction = formulario['interaction']
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
         # Envia para aprovação
         await enviar_para_aprovacao(usuario, formulario['respostas'])
@@ -245,10 +254,27 @@ class AprovacaoView(discord.ui.View):
             if cargo_aprovado:
                 await usuario.add_roles(cargo_aprovado)
 
-            # Atualiza a mensagem
+            # Altera o nickname do usuário
+            try:
+                novo_nickname = f"{self.nome_in_game} | {self.id_jogo}"
+                await usuario.edit(nick=novo_nickname)
+                print(f"✅ Nickname alterado para: {novo_nickname}")
+            except Exception as e:
+                print(f"❌ Erro ao alterar nickname: {e}")
+
+            # Registra o membro no sistema
+            registro_membros[usuario.id] = {
+                'nome_in_game': self.nome_in_game,
+                'id_jogo': self.id_jogo,
+                'id_recrutador': self.id_recrutador,
+                'data_aprovacao': datetime.now()
+            }
+
+            # Atualiza a mensagem de aprovação
             embed = interaction.message.embeds[0]
             embed.color = 0x00ff00
             embed.add_field(name="✅ STATUS", value=f"Aprovado por {interaction.user.mention}", inline=False)
+            embed.add_field(name="🔔 Ações realizadas", value=f"• Cargo atualizado\n• Nickname alterado: {novo_nickname}", inline=False)
             await interaction.message.edit(embed=embed, view=None)
             
             await interaction.response.send_message("✅ Usuário aprovado com sucesso!", ephemeral=True)
@@ -257,12 +283,20 @@ class AprovacaoView(discord.ui.View):
             try:
                 embed = discord.Embed(
                     title="🎉 PARABÉNS!",
-                    description="Seu formulário foi **APROVADO**!\n\nAgora você faz parte da nossa equipe!",
+                    description=f"Seu formulário foi **APROVADO**!\n\n**Nickname definido:** {novo_nickname}\n\nAgora você faz parte da nossa equipe!",
                     color=0x00ff00
                 )
                 await usuario.send(embed=embed)
             except:
                 pass
+
+            # Log no canal de logs
+            await registrar_log(
+                guild, 
+                "✅ MEMBRO APROVADO", 
+                f"{usuario.mention} foi aprovado\n**Nome In-Game:** {self.nome_in_game}\n**ID Jogo:** {self.id_jogo}",
+                0x00ff00
+            )
 
         except Exception as e:
             await interaction.response.send_message(f"❌ Erro ao aprovar: {e}", ephemeral=True)
@@ -281,7 +315,7 @@ class AprovacaoView(discord.ui.View):
             return
 
         try:
-            # Remove todos os cargos e kicka
+            # Remove todos os cargos
             await usuario.edit(roles=[])
             
             # Atualiza a mensagem
@@ -303,11 +337,34 @@ class AprovacaoView(discord.ui.View):
             except:
                 pass
             
+            # Log antes de kickar
+            await registrar_log(
+                guild, 
+                "❌ MEMBRO REPROVADO", 
+                f"{usuario.mention} foi reprovado\n**Nome In-Game:** {self.nome_in_game}\n**ID Jogo:** {self.id_jogo}",
+                0xff0000
+            )
+            
             # Kicka o usuário
             await usuario.kick(reason="Formulário reprovado")
 
         except Exception as e:
             await interaction.response.send_message(f"❌ Erro ao reprovar: {e}", ephemeral=True)
+
+async def registrar_log(guild, titulo, descricao, cor):
+    """Registra log no canal de logs"""
+    try:
+        canal_logs = bot.get_channel(CONFIG['log_channel_id'])
+        if canal_logs:
+            embed = discord.Embed(
+                title=titulo,
+                description=descricao,
+                color=cor,
+                timestamp=datetime.now()
+            )
+            await canal_logs.send(embed=embed)
+    except Exception as e:
+        print(f"Erro ao registrar log: {e}")
 
 @bot.event
 async def on_ready():
@@ -331,20 +388,47 @@ async def on_member_join(member):
                 print(f"Cargo 'Aguardando' adicionado para {member.name}")
                 
                 # Log no canal de logs
-                canal_logs = bot.get_channel(CONFIG['log_channel_id'])
-                if canal_logs:
-                    embed = discord.Embed(
-                        title="👤 NOVO MEMBRO",
-                        description=f"{member.mention} entrou no servidor",
-                        color=0x00ff00,
-                        timestamp=datetime.now()
-                    )
-                    embed.add_field(name="Cargo adicionado", value=cargo_aguardando.name, inline=True)
-                    await canal_logs.send(embed=embed)
+                await registrar_log(
+                    member.guild,
+                    "👤 NOVO MEMBRO",
+                    f"{member.mention} entrou no servidor\nCargo: {cargo_aguardando.name}",
+                    0x00ff00
+                )
             else:
                 print(f"❌ Cargo Aguardando não encontrado (ID: {CONFIG['aguardando_cargo_id']})")
     except Exception as e:
         print(f"❌ Erro ao adicionar cargo para {member.name}: {e}")
+
+@bot.event
+async def on_member_remove(member):
+    """Registra quando um membro sai do servidor"""
+    print(f"Membro saiu: {member.name}")
+    
+    # Verifica se era um membro aprovado e registrado
+    if member.id in registro_membros:
+        dados = registro_membros[member.id]
+        
+        await registrar_log(
+            member.guild,
+            "🚪 MEMBRO SAIU",
+            f"**{member.name}** saiu do servidor\n"
+            f"**Nome In-Game:** {dados['nome_in_game']}\n"
+            f"**ID Jogo:** {dados['id_jogo']}\n"
+            f"**Recrutador:** {dados['id_recrutador']}\n"
+            f"**Data de aprovação:** {dados['data_aprovacao'].strftime('%d/%m/%Y %H:%M')}",
+            0xffa500  # Laranja
+        )
+        
+        # Remove dos registros
+        del registro_membros[member.id]
+    else:
+        # Membro não aprovado ou não registrado
+        await registrar_log(
+            member.guild,
+            "🚪 MEMBRO SAIU",
+            f"**{member.name}** saiu do servidor\n*(Não aprovado/registrado)*",
+            0x808080  # Cinza
+        )
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -370,6 +454,10 @@ async def verificar_config(ctx):
     embed.add_field(name="📝 Canal Aprovação", value=f"{canal_aprov.mention if canal_aprov else '❌ Não encontrado'}", inline=True)
     embed.add_field(name="📊 Canal Logs", value=f"{canal_logs.mention if canal_logs else '❌ Não encontrado'}", inline=True)
     
+    # Status dos registros
+    embed.add_field(name="📈 Membros registrados", value=len(registro_membros), inline=True)
+    embed.add_field(name="📝 Formulários ativos", value=len(formularios_ativos), inline=True)
+    
     await ctx.send(embed=embed)
 
 @bot.command()
@@ -386,7 +474,7 @@ async def criarbotao(ctx):
             )
             embed.add_field(
                 name="ℹ️ INSTRUÇÕES",
-                value="• Você deve ter o cargo 'Aguardando Formulário'\n• Preencha todas as informações corretamente\n• Aguarde a aprovação da equipe\n\n**⚠️ As respostas serão enviadas via DM**",
+                value="• Você deve ter o cargo 'Aguardando Formulário'\n• Preencha todas as informações corretamente\n• Aguarde a aprovação da equipe\n• **As perguntas aparecerão aqui (só você vê)**",
                 inline=False
             )
             
@@ -425,6 +513,7 @@ async def status(ctx):
     embed.add_field(name="📊 Servidores", value=len(bot.guilds), inline=True)
     embed.add_field(name="👤 Usuários", value=len(bot.users), inline=True)
     embed.add_field(name="📋 Formulários ativos", value=len(formularios_ativos), inline=True)
+    embed.add_field(name="📈 Membros registrados", value=len(registro_membros), inline=True)
     embed.add_field(name="🏓 Latência", value=f"{round(bot.latency * 1000)}ms", inline=True)
     await ctx.send(embed=embed)
 
