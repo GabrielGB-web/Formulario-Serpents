@@ -2,7 +2,9 @@ import discord
 from discord.ext import commands
 import os
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
+import pandas as pd
+from collections import Counter
 
 # CONFIGURAÇÕES - COLE OS IDs CORRETOS AQUI
 CONFIG = {
@@ -18,6 +20,7 @@ CONFIG = {
 # Dados para formulários e registros
 formularios_ativos = {}
 registro_membros = {}  # Para armazenar ID do jogo dos membros
+recrutamento_data = {}  # Para armazenar dados de recrutamento
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=CONFIG['prefixo'], intents=intents)
@@ -263,18 +266,30 @@ class AprovacaoView(discord.ui.View):
                 print(f"❌ Erro ao alterar nickname: {e}")
 
             # Registra o membro no sistema
+            data_aprovacao = datetime.now()
             registro_membros[usuario.id] = {
                 'nome_in_game': self.nome_in_game,
                 'id_jogo': self.id_jogo,
                 'id_recrutador': self.id_recrutador,
-                'data_aprovacao': datetime.now()
+                'data_aprovacao': data_aprovacao
             }
+
+            # Registra no sistema de recrutamento
+            if self.id_recrutador not in recrutamento_data:
+                recrutamento_data[self.id_recrutador] = []
+            
+            recrutamento_data[self.id_recrutador].append({
+                'id_jogo': self.id_jogo,
+                'nome_in_game': self.nome_in_game,
+                'data_recrutamento': data_aprovacao,
+                'recrutador': self.id_recrutador
+            })
 
             # Atualiza a mensagem de aprovação
             embed = interaction.message.embeds[0]
             embed.color = 0x00ff00
             embed.add_field(name="✅ STATUS", value=f"Aprovado por {interaction.user.mention}", inline=False)
-            embed.add_field(name="🔔 Ações realizadas", value=f"• Cargo atualizado\n• Nickname alterado: {novo_nickname}", inline=False)
+            embed.add_field(name="🔔 Ações realizadas", value=f"• Cargo atualizado\n• Nickname alterado: {novo_nickname}\n• Recrutador registrado: {self.id_recrutador}", inline=False)
             await interaction.message.edit(embed=embed, view=None)
             
             await interaction.response.send_message("✅ Usuário aprovado com sucesso!", ephemeral=True)
@@ -294,7 +309,7 @@ class AprovacaoView(discord.ui.View):
             await registrar_log(
                 guild, 
                 "✅ MEMBRO APROVADO", 
-                f"{usuario.mention} foi aprovado\n**Nome In-Game:** {self.nome_in_game}\n**ID Jogo:** {self.id_jogo}",
+                f"{usuario.mention} foi aprovado\n**Nome In-Game:** {self.nome_in_game}\n**ID Jogo:** {self.id_jogo}\n**Recrutador:** {self.id_recrutador}",
                 0x00ff00
             )
 
@@ -341,7 +356,7 @@ class AprovacaoView(discord.ui.View):
             await registrar_log(
                 guild, 
                 "❌ MEMBRO REPROVADO", 
-                f"{usuario.mention} foi reprovado\n**Nome In-Game:** {self.nome_in_game}\n**ID Jogo:** {self.id_jogo}",
+                f"{usuario.mention} foi reprovado\n**Nome In-Game:** {self.nome_in_game}\n**ID Jogo:** {self.id_jogo}\n**Recrutador:** {self.id_recrutador}",
                 0xff0000
             )
             
@@ -365,6 +380,216 @@ async def registrar_log(guild, titulo, descricao, cor):
             await canal_logs.send(embed=embed)
     except Exception as e:
         print(f"Erro ao registrar log: {e}")
+
+def gerar_relatorio_mensal():
+    """Gera relatório de recrutamento do mês atual"""
+    agora = datetime.now()
+    primeiro_dia_mes = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    recrutamentos_mes = {}
+    
+    for recrutador_id, recrutamentos in recrutamento_data.items():
+        recrutamentos_filtrados = [
+            r for r in recrutamentos 
+            if r['data_recrutamento'] >= primeiro_dia_mes
+        ]
+        if recrutamentos_filtrados:
+            recrutamentos_mes[recrutador_id] = recrutamentos_filtrados
+    
+    return recrutamentos_mes, primeiro_dia_mes, agora
+
+def gerar_relatorio_periodo(dias=30):
+    """Gera relatório dos últimos N dias"""
+    data_inicio = datetime.now() - timedelta(days=dias)
+    
+    recrutamentos_periodo = {}
+    
+    for recrutador_id, recrutamentos in recrutamento_data.items():
+        recrutamentos_filtrados = [
+            r for r in recrutamentos 
+            if r['data_recrutamento'] >= data_inicio
+        ]
+        if recrutamentos_filtrados:
+            recrutamentos_periodo[recrutador_id] = recrutamentos_filtrados
+    
+    return recrutamentos_periodo, data_inicio, datetime.now()
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def relatorio(ctx, periodo: str = "mensal"):
+    """
+    Gera relatório de recrutamento
+    Uso: !relatorio [mensal|30d|7d|total]
+    """
+    try:
+        if periodo.lower() == "mensal":
+            dados, inicio, fim = gerar_relatorio_mensal()
+            titulo = "📊 RELATÓRIO MENSAL DE RECRUTAMENTO"
+            periodo_str = f"{inicio.strftime('%B/%Y')}"
+        elif periodo.lower() == "30d":
+            dados, inicio, fim = gerar_relatorio_periodo(30)
+            titulo = "📊 RELATÓRIO - ÚLTIMOS 30 DIAS"
+            periodo_str = f"{inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+        elif periodo.lower() == "7d":
+            dados, inicio, fim = gerar_relatorio_periodo(7)
+            titulo = "📊 RELATÓRIO - ÚLTIMOS 7 DIAS"
+            periodo_str = f"{inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+        elif periodo.lower() == "total":
+            dados = recrutamento_data
+            titulo = "📊 RELATÓRIO TOTAL DE RECRUTAMENTO"
+            periodo_str = "Todos os tempos"
+        else:
+            await ctx.send("❌ Período inválido! Use: `mensal`, `30d`, `7d` ou `total`")
+            return
+
+        if not dados:
+            embed = discord.Embed(
+                title=titulo,
+                description=f"**Período:** {periodo_str}\n\nNenhum recrutamento registrado neste período.",
+                color=0x808080
+            )
+            await ctx.send(embed=embed)
+            return
+
+        # Ordena recrutadores por quantidade (maior primeiro)
+        recrutadores_ordenados = sorted(
+            dados.items(), 
+            key=lambda x: len(x[1]), 
+            reverse=True
+        )
+
+        embed = discord.Embed(
+            title=titulo,
+            description=f"**Período:** {periodo_str}\n**Total de recrutadores ativos:** {len(dados)}",
+            color=0x0099ff
+        )
+
+        # Adiciona top 10 recrutadores
+        for i, (recrutador_id, recrutamentos) in enumerate(recrutadores_ordenados[:10], 1):
+            embed.add_field(
+                name=f"🏆 #{i} - ID: {recrutador_id}",
+                value=f"**Recrutamentos:** {len(recrutamentos)}\n**Último:** {recrutamentos[-1]['data_recrutamento'].strftime('%d/%m/%Y')}",
+                inline=True
+            )
+
+        # Estatísticas gerais
+        total_recrutamentos = sum(len(recrutamentos) for recrutamentos in dados.values())
+        media_por_recrutador = total_recrutamentos / len(dados) if dados else 0
+        
+        embed.add_field(
+            name="📈 ESTATÍSTICAS",
+            value=f"**Total de recrutamentos:** {total_recrutamentos}\n**Média por recrutador:** {media_por_recrutador:.1f}\n**Recrutador top:** ID {recrutadores_ordenados[0][0]} ({len(recrutadores_ordenados[0][1])} recrutamentos)",
+            inline=False
+        )
+
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ Erro ao gerar relatório: {e}")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def recrutador(ctx, id_recrutador: str = None):
+    """
+    Mostra estatísticas detalhadas de um recrutador
+    Uso: !recrutador <ID>
+    """
+    if not id_recrutador:
+        await ctx.send("❌ Informe o ID do recrutador: `!recrutador <ID>`")
+        return
+
+    if id_recrutador not in recrutamento_data:
+        await ctx.send(f"❌ Nenhum dado encontrado para o recrutador ID: `{id_recrutador}`")
+        return
+
+    recrutamentos = recrutamento_data[id_recrutador]
+    
+    # Recrutamentos do mês
+    primeiro_dia_mes = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    recrutamentos_mes = [r for r in recrutamentos if r['data_recrutamento'] >= primeiro_dia_mes]
+    
+    # Recrutamentos últimos 7 dias
+    sete_dias_atras = datetime.now() - timedelta(days=7)
+    recrutamentos_7d = [r for r in recrutamentos if r['data_recrutamento'] >= sete_dias_atras]
+
+    embed = discord.Embed(
+        title=f"👤 ESTATÍSTICAS DO RECRUTADOR",
+        description=f"**ID:** {id_recrutador}",
+        color=0x00ff00
+    )
+
+    embed.add_field(
+        name="📊 RECRUTAMENTOS TOTAIS",
+        value=f"**Total:** {len(recrutamentos)}\n**Primeiro recrutamento:** {recrutamentos[0]['data_recrutamento'].strftime('%d/%m/%Y')}\n**Último recrutamento:** {recrutamentos[-1]['data_recrutamento'].strftime('%d/%m/%Y')}",
+        inline=False
+    )
+
+    embed.add_field(
+        name="🗓️ ESTE MÊS",
+        value=f"**Recrutamentos:** {len(recrutamentos_mes)}\n**Média diária:** {len(recrutamentos_mes) / datetime.now().day:.1f}",
+        inline=True
+    )
+
+    embed.add_field(
+        name="📅 ÚLTIMOS 7 DIAS",
+        value=f"**Recrutamentos:** {len(recrutamentos_7d)}",
+        inline=True
+    )
+
+    # Últimos 5 recrutamentos
+    ultimos_recrutamentos = recrutamentos[-5:] if len(recrutamentos) >= 5 else recrutamentos
+    if ultimos_recrutamentos:
+        ultimos_str = "\n".join([
+            f"• {r['nome_in_game']} ({r['id_jogo']}) - {r['data_recrutamento'].strftime('%d/%m')}"
+            for r in reversed(ultimos_recrutamentos)
+        ])
+        embed.add_field(
+            name="🆕 ÚLTIMOS RECRUTAMENTOS",
+            value=ultimos_str,
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def toprecrutadores(ctx, limite: int = 10):
+    """
+    Mostra o ranking de recrutadores
+    Uso: !toprecrutadores [limite]
+    """
+    if not recrutamento_data:
+        await ctx.send("❌ Nenhum dado de recrutamento registrado ainda.")
+        return
+
+    # Ordena recrutadores por quantidade
+    recrutadores_ordenados = sorted(
+        recrutamento_data.items(), 
+        key=lambda x: len(x[1]), 
+        reverse=True
+    )[:limite]
+
+    embed = discord.Embed(
+        title="🏆 TOP RECRUTADORES",
+        description=f"Ranking dos {len(recrutadores_ordenados)} melhores recrutadores",
+        color=0xFFD700
+    )
+
+    for i, (recrutador_id, recrutamentos) in enumerate(recrutadores_ordenados, 1):
+        # Recrutamentos do mês
+        primeiro_dia_mes = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        recrutamentos_mes = len([r for r in recrutamentos if r['data_recrutamento'] >= primeiro_dia_mes])
+
+        medalhas = {1: "🥇", 2: "🥈", 3: "🥉"}
+        medalha = medalhas.get(i, f"#{i}")
+        
+        embed.add_field(
+            name=f"{medalha} ID: {recrutador_id}",
+            value=f"**Total:** {len(recrutamentos)}\n**Este mês:** {recrutamentos_mes}",
+            inline=True
+        )
+
+    await ctx.send(embed=embed)
 
 @bot.event
 async def on_ready():
@@ -457,6 +682,7 @@ async def verificar_config(ctx):
     # Status dos registros
     embed.add_field(name="📈 Membros registrados", value=len(registro_membros), inline=True)
     embed.add_field(name="📝 Formulários ativos", value=len(formularios_ativos), inline=True)
+    embed.add_field(name="👥 Recrutadores ativos", value=len(recrutamento_data), inline=True)
     
     await ctx.send(embed=embed)
 
@@ -514,6 +740,7 @@ async def status(ctx):
     embed.add_field(name="👤 Usuários", value=len(bot.users), inline=True)
     embed.add_field(name="📋 Formulários ativos", value=len(formularios_ativos), inline=True)
     embed.add_field(name="📈 Membros registrados", value=len(registro_membros), inline=True)
+    embed.add_field(name="👥 Recrutadores ativos", value=len(recrutamento_data), inline=True)
     embed.add_field(name="🏓 Latência", value=f"{round(bot.latency * 1000)}ms", inline=True)
     await ctx.send(embed=embed)
 
@@ -531,6 +758,12 @@ async def ajuda(ctx):
     embed.add_field(
         name="👑 Comandos de Administrador",
         value="`!verificar_config` - Verifica configuração\n`!criarbotao` - Cria botão do formulário\n`!addcargo @usuário` - Adiciona cargo manualmente",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="📊 COMANDOS DE RELATÓRIO",
+        value="`!relatorio [mensal|30d|7d|total]` - Relatório de recrutamento\n`!recrutador <ID>` - Estatísticas do recrutador\n`!toprecrutadores [limite]` - Ranking de recrutadores",
         inline=False
     )
     
