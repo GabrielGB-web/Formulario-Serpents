@@ -324,54 +324,63 @@ class AprovacaoView(discord.ui.View):
         except Exception as e:
             await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
-# ========== SISTEMA DE AÇÕES ==========
-class ConfirmarAcaoView(discord.ui.View):
-    def __init__(self, acao_id):
-        super().__init__(timeout=None)
-        self.acao_id = acao_id
-
-    @discord.ui.button(label="✅ Participar", style=discord.ButtonStyle.success, custom_id="confirmar_acao")
-    async def confirmar_participacao(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.acao_id not in acoes_ativas:
-            await interaction.response.send_message("❌ Ação não encontrada.", ephemeral=True)
-            return
-
-        acao = acoes_ativas[self.acao_id]
-        
-        if interaction.user.id in acao['participantes']:
-            await interaction.response.send_message("❌ Você já está participando!", ephemeral=True)
-            return
-
-        if len(acao['participantes']) >= acao['vagas']:
-            await interaction.response.send_message("❌ Não há vagas!", ephemeral=True)
-            return
-
-        acao['participantes'][interaction.user.id] = {
-            'nome': interaction.user.display_name,
-            'adicionado_em': datetime.now()
-        }
-
-        await atualizar_mensagem_acao(acao)
-        await interaction.response.send_message(f"✅ **Você entrou na ação!**\n{len(acao['participantes'])}/{acao['vagas']} vagas", ephemeral=True)
-
+# ========== SISTEMA DE AÇÕES CORRIGIDO ==========
 class AcaoView(discord.ui.View):
     def __init__(self, acao_id):
         super().__init__(timeout=None)
         self.acao_id = acao_id
 
-    @discord.ui.button(label="👀 Ver Lista", style=discord.ButtonStyle.primary, custom_id="ver_participantes")
-    async def ver_participantes(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="✅ Participar", style=discord.ButtonStyle.success, custom_id="participar_acao")
+    async def participar_acao(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.acao_id not in acoes_ativas:
-            await interaction.response.send_message("❌ Ação não encontrada.", ephemeral=True)
+            await interaction.response.send_message("❌ Esta ação não está mais disponível.", ephemeral=True)
+            return
+
+        acao = acoes_ativas[self.acao_id]
+        
+        # Verifica se já está participando
+        if interaction.user.id in acao['participantes']:
+            await interaction.response.send_message("❌ Você já está participando desta ação!", ephemeral=True)
+            return
+
+        # Verifica se há vagas disponíveis
+        if len(acao['participantes']) >= acao['vagas']:
+            await interaction.response.send_message("❌ Não há mais vagas disponíveis para esta ação!", ephemeral=True)
+            return
+
+        # Adiciona participante
+        acao['participantes'][interaction.user.id] = {
+            'nome': interaction.user.display_name,
+            'adicionado_em': datetime.now()
+        }
+
+        # Atualiza a mensagem da ação
+        await atualizar_mensagem_acao(acao)
+
+        await interaction.response.send_message(
+            f"✅ **Você foi adicionado à ação!**\n"
+            f"**Ação:** {acao['nome']}\n"
+            f"**Data:** {acao['data']}\n"
+            f"**Vaga:** {len(acao['participantes'])}/{acao['vagas']}",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="👀 Ver Lista", style=discord.ButtonStyle.primary, custom_id="ver_lista_acao")
+    async def ver_lista_acao(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.acao_id not in acoes_ativas:
+            await interaction.response.send_message("❌ Esta ação não está mais disponível.", ephemeral=True)
             return
 
         acao = acoes_ativas[self.acao_id]
         
         if not acao['participantes']:
-            await interaction.response.send_message("📝 **Nenhum participante.**", ephemeral=True)
+            await interaction.response.send_message("📝 **Nenhum participante ainda.**", ephemeral=True)
             return
 
-        participantes_lista = "\n".join(f"• {p['nome']}" for p in acao['participantes'].values())
+        participantes_lista = "\n".join(
+            f"• {participante['nome']}" 
+            for participante in acao['participantes'].values()
+        )
 
         embed = discord.Embed(
             title=f"👥 PARTICIPANTES - {acao['nome']}",
@@ -385,51 +394,78 @@ class AcaoView(discord.ui.View):
     @discord.ui.button(label="❌ Sair", style=discord.ButtonStyle.danger, custom_id="sair_acao")
     async def sair_acao(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.acao_id not in acoes_ativas:
-            await interaction.response.send_message("❌ Ação não encontrada.", ephemeral=True)
+            await interaction.response.send_message("❌ Esta ação não está mais disponível.", ephemeral=True)
             return
 
         acao = acoes_ativas[self.acao_id]
         
         if interaction.user.id not in acao['participantes']:
-            await interaction.response.send_message("❌ Você não está nesta ação.", ephemeral=True)
+            await interaction.response.send_message("❌ Você não está participando desta ação.", ephemeral=True)
             return
 
+        # Remove participante
         participante = acao['participantes'][interaction.user.id]
         del acao['participantes'][interaction.user.id]
 
+        # Atualiza a mensagem da ação
         await atualizar_mensagem_acao(acao)
-        await interaction.response.send_message(f"✅ **Você saiu da ação!**", ephemeral=True)
+
+        await interaction.response.send_message(
+            f"✅ **Você saiu da ação!**\n"
+            f"**Ação:** {acao['nome']}\n"
+            f"**Vagas restantes:** {len(acao['participantes'])}/{acao['vagas']}",
+            ephemeral=True
+        )
 
 async def atualizar_mensagem_acao(acao):
+    """Atualiza a mensagem da ação com participantes atualizados"""
     try:
         canal = bot.get_channel(CONFIG['canal_acoes_id'])
         if canal and acao['mensagem_id']:
             mensagem = await canal.fetch_message(acao['mensagem_id'])
             
+            # Determina a cor baseado nas vagas
+            if len(acao['participantes']) >= acao['vagas']:
+                cor = 0xff0000  # Vermelho quando lotado
+            else:
+                cor = 0x00ff00  # Verde quando há vagas
+            
             embed = discord.Embed(
                 title=f"⚔️ AÇÃO: {acao['nome']}",
-                color=0xff0000 if len(acao['participantes']) >= acao['vagas'] else 0x00ff00
+                color=cor
             )
             
             embed.add_field(name="📅 Data", value=acao['data'], inline=True)
-            embed.add_field(name="🕐 Hora", value=acao['hora'], inline=True)
+            embed.add_field(name="🕐 Horário", value=acao['hora'], inline=True)
             embed.add_field(name="🎯 Vagas", value=f"{len(acao['participantes'])}/{acao['vagas']}", inline=True)
             
+            # Lista de participantes (máximo 8 para não ficar muito longo)
             if acao['participantes']:
-                participantes_lista = "\n".join(f"• {p['nome']}" for p in list(acao['participantes'].values())[:8])
+                participantes_lista = "\n".join(
+                    f"• {p['nome']}" 
+                    for p in list(acao['participantes'].values())[:8]
+                )
                 if len(acao['participantes']) > 8:
                     participantes_lista += f"\n• ... e mais {len(acao['participantes']) - 8}"
             else:
-                participantes_lista = "📝 Nenhum participante"
+                participantes_lista = "📝 Nenhum participante ainda"
             
             embed.add_field(name="👥 Participantes", value=participantes_lista, inline=False)
-            embed.set_footer(text=f"ID: {acao['id']}")
+            
+            # Instruções baseadas no status
+            if len(acao['participantes']) >= acao['vagas']:
+                embed.add_field(name="📝 Status", value="🚫 **LOTADO** - Não há mais vagas", inline=False)
+            else:
+                embed.add_field(name="📝 Como participar", value="Clique em **✅ Participar** abaixo", inline=False)
+            
+            embed.set_footer(text=f"ID: {acao['id']} • Use os botões para gerenciar participação")
 
+            # SEMPRE mantém todos os três botões visíveis
             view = AcaoView(acao['id'])
             await mensagem.edit(embed=embed, view=view)
             
     except Exception as e:
-        print(f"Erro ao atualizar ação: {e}")
+        print(f"Erro ao atualizar mensagem da ação: {e}")
 
 # ========== COMANDOS ==========
 @bot.command()
@@ -459,48 +495,59 @@ async def acao(ctx, vagas: int, data: str, hora: str, *, nome_acao: str):
         embed.add_field(name="📅 Data", value=data, inline=True)
         embed.add_field(name="🕐 Hora", value=hora, inline=True)
         embed.add_field(name="🎯 Vagas", value=f"0/{vagas}", inline=True)
-        embed.add_field(name="👥 Participantes", value="📝 Nenhum participante", inline=False)
-        embed.add_field(name="📝 Como participar", value="Clique em '✅ Participar' abaixo", inline=False)
-        embed.set_footer(text=f"ID: {acao_id}")
+        embed.add_field(name="👥 Participantes", value="📝 Nenhum participante ainda", inline=False)
+        embed.add_field(name="📝 Como participar", value="Clique em **✅ Participar** abaixo", inline=False)
+        embed.set_footer(text=f"ID: {acao_id} • Criado por {ctx.author.display_name}")
 
-        view = ConfirmarAcaoView(acao_id)
+        # View com TODOS os botões desde o início
+        view = AcaoView(acao_id)
         mensagem = await ctx.send(embed=embed, view=view)
         
         acoes_ativas[acao_id]['mensagem_id'] = mensagem.id
-        await ctx.send(f"✅ **Ação criada!** ID: `{acao_id}`")
+        await ctx.send(f"✅ **Ação criada com sucesso!**\n**ID:** `{acao_id}`")
 
     except Exception as e:
-        await ctx.send(f"❌ Erro: {e}")
+        await ctx.send(f"❌ Erro ao criar ação: {e}")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def fecharacao(ctx, acao_id: str):
     """Fecha uma ação: !fecharacao acao_20231215_203000"""
     if acao_id not in acoes_ativas:
-        await ctx.send("❌ Ação não encontrada.")
+        await ctx.send("❌ Ação não encontrada. Verifique o ID.")
         return
 
     acao = acoes_ativas[acao_id]
     
+    # Cria relatório final
     embed = discord.Embed(
-        title=f"📋 RELATÓRIO - {acao['nome']}",
+        title=f"📋 RELATÓRIO FINAL - {acao['nome']}",
         color=0xffa500
     )
     
     embed.add_field(name="📅 Data", value=acao['data'], inline=True)
-    embed.add_field(name="🕐 Hora", value=acao['hora'], inline=True)
+    embed.add_field(name="🕐 Horário", value=acao['hora'], inline=True)
     embed.add_field(name="✅ Participantes", value=len(acao['participantes']), inline=True)
-    embed.add_field(name="🎯 Vagas", value=f"{len(acao['participantes'])}/{acao['vagas']}", inline=True)
+    embed.add_field(name="🎯 Vagas Ocupadas", value=f"{len(acao['participantes'])}/{acao['vagas']}", inline=True)
 
+    # Lista de participantes
     if acao['participantes']:
-        participantes_lista = "\n".join(f"• {p['nome']}" for p in acao['participantes'].values())
-        embed.add_field(name="👥 Participantes", value=participantes_lista, inline=False)
+        participantes_lista = "\n".join(
+            f"• {participante['nome']}" 
+            for participante in acao['participantes'].values()
+        )
+        embed.add_field(name="👥 Lista de Participantes", value=participantes_lista, inline=False)
     else:
-        embed.add_field(name="👥 Participantes", value="❌ Nenhum", inline=False)
+        embed.add_field(name="👥 Participantes", value="❌ Nenhum participante", inline=False)
+
+    embed.set_footer(text=f"Ação encerrada por {ctx.author.display_name}")
 
     await ctx.send(embed=embed)
+    
+    # Remove ação
     del acoes_ativas[acao_id]
     
+    # Tenta deletar a mensagem original da ação
     try:
         canal = bot.get_channel(CONFIG['canal_acoes_id'])
         if canal and acao['mensagem_id']:
@@ -514,12 +561,15 @@ async def hierarquia(ctx):
     """Mostra a hierarquia do servidor: !hierarquia"""
     try:
         guild = ctx.guild
+        
+        # Coleta membros e seus cargos
         membros_hierarquia = {}
         
         for member in guild.members:
             if member.bot:
                 continue
                 
+            # Verifica tags de hierarquia no nickname
             nickname = member.display_name
             hierarquia_encontrada = None
             
@@ -532,9 +582,17 @@ async def hierarquia(ctx):
                 tag, nome_hierarquia = hierarquia_encontrada
                 if nome_hierarquia not in membros_hierarquia:
                     membros_hierarquia[nome_hierarquia] = []
+                
                 membros_hierarquia[nome_hierarquia].append(member)
 
-        ordem_hierarquia = ['🎯 Líder', '🛡️ Coordenador', '⚔️ Gerente de Ações', '🔰 Sub-Líder', '👥 Membro']
+        # Ordena hierarquias por ordem de importância
+        ordem_hierarquia = [
+            '🎯 Líder',
+            '🛡️ Coordenador', 
+            '⚔️ Gerente de Ações',
+            '🔰 Sub-Líder',
+            '👥 Membro'
+        ]
         
         embed = discord.Embed(
             title="🏛️ HIERARQUIA DO SERVIDOR",
@@ -545,38 +603,60 @@ async def hierarquia(ctx):
         for hierarquia in ordem_hierarquia:
             if hierarquia in membros_hierarquia:
                 membros = membros_hierarquia[hierarquia]
+                
+                # Ordena membros alfabeticamente
                 membros.sort(key=lambda x: x.display_name.lower())
                 
-                lista_membros = "\n".join(f"• {member.mention}" for member in membros[:10])
+                # CORREÇÃO: Mostra os nomes dos membros
+                lista_membros = "\n".join(
+                    f"• {member.display_name}" 
+                    for member in membros[:15]  # Limite de 15 por campo
+                )
                 
-                if len(membros) > 10:
-                    lista_membros += f"\n• ... e mais {len(membros) - 10}"
+                if len(membros) > 15:
+                    lista_membros += f"\n• ... e mais {len(membros) - 15} membros"
+                elif not lista_membros.strip():
+                    lista_membros = "• Nenhum membro nesta categoria"
                 
                 embed.add_field(
                     name=f"{hierarquia} ({len(membros)})",
-                    value=lista_membros if lista_membros.strip() else "Nenhum",
+                    value=lista_membros,
                     inline=False
                 )
 
+        total_membros = len([m for m in guild.members if not m.bot])
+        embed.set_footer(text=f"Total de membros: {total_membros}")
         await ctx.send(embed=embed)
 
     except Exception as e:
-        await ctx.send(f"❌ Erro: {e}")
+        await ctx.send(f"❌ Erro ao gerar hierarquia: {e}")
 
 @bot.command()
 async def acoesativas(ctx):
     """Mostra ações ativas: !acoesativas"""
     if not acoes_ativas:
-        await ctx.send("📝 **Nenhuma ação ativa.**")
+        embed = discord.Embed(
+            title="📋 AÇÕES ATIVAS",
+            description="Nenhuma ação ativa no momento.",
+            color=0x808080
+        )
+        await ctx.send(embed=embed)
         return
 
-    embed = discord.Embed(title="📋 AÇÕES ATIVAS", color=0x0099ff)
+    embed = discord.Embed(
+        title="📋 AÇÕES ATIVAS",
+        description=f"Total: {len(acoes_ativas)} ação(ões)",
+        color=0x0099ff
+    )
 
     for acao_id, acao in acoes_ativas.items():
         embed.add_field(
             name=f"⚔️ {acao['nome']}",
-            value=f"**Data:** {acao['data']} | **Hora:** {acao['hora']}\n**Vagas:** {len(acao['participantes'])}/{acao['vagas']}\n**ID:** `{acao_id}`",
-            inline=False
+            value=f"**Data:** {acao['data']}\n"
+                  f"**Hora:** {acao['hora']}\n"
+                  f"**Vagas:** {len(acao['participantes'])}/{acao['vagas']}\n"
+                  f"**ID:** `{acao_id}`",
+            inline=True
         )
 
     await ctx.send(embed=embed)
@@ -592,7 +672,7 @@ async def removerparticipante(ctx, acao_id: str, member: discord.Member):
     acao = acoes_ativas[acao_id]
     
     if member.id not in acao['participantes']:
-        await ctx.send("❌ Usuário não está na ação.")
+        await ctx.send("❌ Usuário não está nesta ação.")
         return
 
     participante = acao['participantes'][member.id]
@@ -731,6 +811,9 @@ async def ajuda(ctx):
 async def on_ready():
     print(f'✅ {bot.user.name} online!')
     bot.add_view(IniciarFormularioView())
+    # Registrar a view das ações também
+    for acao_id in acoes_ativas.keys():
+        bot.add_view(AcaoView(acao_id))
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="!ajuda"))
 
 @bot.event
