@@ -587,11 +587,17 @@ async def hierarquia(ctx):
 
         # Ordena hierarquias por ordem de importância
         ordem_hierarquia = [
-            '🎯 Líder',
-            '🛡️ Coordenador', 
-            '⚔️ Gerente de Ações',
-            '🔰 Sub-Líder',
-            '👥 Membro'
+            '👑・LÍDER',
+            '👑・LÍDER',
+            ''👑・LÍDER',
+            '👑・LÍDER',
+            '👑・LÍDER', 
+            '💫・SUB LÍDER',
+            '☠️・GERENTE GERAL',
+            '📑・GERENTE RECRUTADOR',
+            '🔫・LÍDER ELITE',
+            '🔫・GERENTE ELITE',
+            '🎯・GERENTE AÇÃO'
         ]
         
         embed = discord.Embed(
