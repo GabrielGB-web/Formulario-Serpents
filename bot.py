@@ -12,7 +12,7 @@ CONFIG = {
     'canal_aprovacao_id': 1423055315259363449,
     'log_channel_id': 1423051035575848963,
     'cargo_gerente_id': 1421001020955430985,
-    'canal_acoes_id': 1423057145875792003,  # Canal para ações (pode ser o mesmo do formulário)
+    'canal_acoes_id': 1421001024482840666,  # Canal para ações (pode ser o mesmo do formulário)
     'prefixo': '!'
 }
 
@@ -22,11 +22,17 @@ registro_membros = {}
 recrutamento_data = {}
 acoes_ativas = {}  # Sistema de ações
 hierarquia_roles = {  # Configuração das hierarquias
-    '[L]': '🎯 Líder',
-    '[CO]': '🛡️ Coordenador',
-    '[GA]': '⚔️ Gerente de Ações', 
-    '[SUB]': '🔰 Sub-Líder',
-    '[MEM]': '👥 Membro'
+    '[00]': '👑・LÍDER',
+    '[01]': '👑・LÍDER',
+    '[02]': '👑・LÍDER',
+    '[03]': '👑・LÍDER',
+    '[04]': '👑・LÍDER', 
+    '[SUB]': '💫・SUB LÍDER',
+    '[GG]': '☠️・GERENTE GERAL',
+    '[REC]': '📑・GERENTE RECRUTADOR',
+    '[LEL]': '🔫・LÍDER ELITE',
+    '[GE]': '🔫・GERENTE ELITE',
+    '[GA]': '🎯・GERENTE AÇÃO'
 }
 
 intents = discord.Intents.all()
