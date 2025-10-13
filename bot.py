@@ -11,8 +11,8 @@ CONFIG = {
     'canal_formulario_id': 1423057145875792003,
     'canal_aprovacao_id': 1423055315259363449,
     'log_channel_id': 1423051035575848963,
-    'cargo_gerente_id': 1421001020955430985,
-    'canal_acoes_id': 1421001024482840666,  # Canal para ações (pode ser o mesmo do formulário)
+    'cargos_gerente': [1421001020955430987, 1421156024714268743, 1424462914965999707, 1423112266676703334],  # MULTIPLOS CARGOS
+    'canal_acoes_id': 1421001024482840666,
     'prefixo': '!'
 }
 
@@ -20,16 +20,18 @@ CONFIG = {
 formularios_ativos = {}
 registro_membros = {}
 recrutamento_data = {}
-acoes_ativas = {}  # Sistema de ações
-hierarquia_roles = {  # Configuração das hierarquias
+acoes_ativas = {}
+
+# NOVA CONFIGURAÇÃO DE HIERARQUIA
+hierarquia_roles = {
     '[00]': '👑・LÍDER',
-    '[01]': '👑・LÍDER',
+    '[01]': '👑・LÍDER', 
     '[02]': '👑・LÍDER',
     '[03]': '👑・LÍDER',
-    '[04]': '👑・LÍDER', 
+    '[04]': '👑・LÍDER',
     '[SUB]': '💫・SUB LÍDER',
     '[GG]': '☠️・GERENTE GERAL',
-    '[REC]': '📑・GERENTE RECRUTADOR',
+    '[REC]': '📑・GERENTE RECRUTADOR', 
     '[LEL]': '🔫・LÍDER ELITE',
     '[GE]': '🔫・GERENTE ELITE',
     '[GA]': '🎯・GERENTE AÇÃO'
@@ -219,7 +221,11 @@ class AprovacaoView(discord.ui.View):
 
     @discord.ui.button(label="✅ APROVAR", style=discord.ButtonStyle.success, custom_id="aprovar")
     async def aprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if CONFIG['cargo_gerente_id'] not in [role.id for role in interaction.user.roles]:
+        # VERIFICA SE TEM ALGUM DOS CARGOS DE GERENTE
+        user_roles = [role.id for role in interaction.user.roles]
+        tem_permissao = any(cargo_id in user_roles for cargo_id in CONFIG['cargos_gerente'])
+        
+        if not tem_permissao:
             await interaction.response.send_message("❌ Apenas gerentes podem aprovar.", ephemeral=True)
             return
 
@@ -287,7 +293,11 @@ class AprovacaoView(discord.ui.View):
 
     @discord.ui.button(label="❌ REPROVAR", style=discord.ButtonStyle.danger, custom_id="reprovar")
     async def reprovar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if CONFIG['cargo_gerente_id'] not in [role.id for role in interaction.user.roles]:
+        # VERIFICA SE TEM ALGUM DOS CARGOS DE GERENTE
+        user_roles = [role.id for role in interaction.user.roles]
+        tem_permissao = any(cargo_id in user_roles for cargo_id in CONFIG['cargos_gerente'])
+        
+        if not tem_permissao:
             await interaction.response.send_message("❌ Apenas gerentes podem reprovar.", ephemeral=True)
             return
 
@@ -324,7 +334,7 @@ class AprovacaoView(discord.ui.View):
         except Exception as e:
             await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
-# ========== SISTEMA DE AÇÕES CORRIGIDO ==========
+# ========== SISTEMA DE AÇÕES ==========
 class AcaoView(discord.ui.View):
     def __init__(self, acao_id):
         super().__init__(timeout=None)
@@ -338,23 +348,19 @@ class AcaoView(discord.ui.View):
 
         acao = acoes_ativas[self.acao_id]
         
-        # Verifica se já está participando
         if interaction.user.id in acao['participantes']:
             await interaction.response.send_message("❌ Você já está participando desta ação!", ephemeral=True)
             return
 
-        # Verifica se há vagas disponíveis
         if len(acao['participantes']) >= acao['vagas']:
             await interaction.response.send_message("❌ Não há mais vagas disponíveis para esta ação!", ephemeral=True)
             return
 
-        # Adiciona participante
         acao['participantes'][interaction.user.id] = {
             'nome': interaction.user.display_name,
             'adicionado_em': datetime.now()
         }
 
-        # Atualiza a mensagem da ação
         await atualizar_mensagem_acao(acao)
 
         await interaction.response.send_message(
@@ -403,11 +409,9 @@ class AcaoView(discord.ui.View):
             await interaction.response.send_message("❌ Você não está participando desta ação.", ephemeral=True)
             return
 
-        # Remove participante
         participante = acao['participantes'][interaction.user.id]
         del acao['participantes'][interaction.user.id]
 
-        # Atualiza a mensagem da ação
         await atualizar_mensagem_acao(acao)
 
         await interaction.response.send_message(
@@ -418,17 +422,15 @@ class AcaoView(discord.ui.View):
         )
 
 async def atualizar_mensagem_acao(acao):
-    """Atualiza a mensagem da ação com participantes atualizados"""
     try:
         canal = bot.get_channel(CONFIG['canal_acoes_id'])
         if canal and acao['mensagem_id']:
             mensagem = await canal.fetch_message(acao['mensagem_id'])
             
-            # Determina a cor baseado nas vagas
             if len(acao['participantes']) >= acao['vagas']:
-                cor = 0xff0000  # Vermelho quando lotado
+                cor = 0xff0000
             else:
-                cor = 0x00ff00  # Verde quando há vagas
+                cor = 0x00ff00
             
             embed = discord.Embed(
                 title=f"⚔️ AÇÃO: {acao['nome']}",
@@ -439,7 +441,6 @@ async def atualizar_mensagem_acao(acao):
             embed.add_field(name="🕐 Horário", value=acao['hora'], inline=True)
             embed.add_field(name="🎯 Vagas", value=f"{len(acao['participantes'])}/{acao['vagas']}", inline=True)
             
-            # Lista de participantes (máximo 8 para não ficar muito longo)
             if acao['participantes']:
                 participantes_lista = "\n".join(
                     f"• {p['nome']}" 
@@ -452,7 +453,6 @@ async def atualizar_mensagem_acao(acao):
             
             embed.add_field(name="👥 Participantes", value=participantes_lista, inline=False)
             
-            # Instruções baseadas no status
             if len(acao['participantes']) >= acao['vagas']:
                 embed.add_field(name="📝 Status", value="🚫 **LOTADO** - Não há mais vagas", inline=False)
             else:
@@ -460,7 +460,6 @@ async def atualizar_mensagem_acao(acao):
             
             embed.set_footer(text=f"ID: {acao['id']} • Use os botões para gerenciar participação")
 
-            # SEMPRE mantém todos os três botões visíveis
             view = AcaoView(acao['id'])
             await mensagem.edit(embed=embed, view=view)
             
@@ -468,8 +467,16 @@ async def atualizar_mensagem_acao(acao):
         print(f"Erro ao atualizar mensagem da ação: {e}")
 
 # ========== COMANDOS ==========
+def tem_permissao_acao():
+    """Decorator para verificar permissão em comandos de ação"""
+    async def predicate(ctx):
+        user_roles = [role.id for role in ctx.author.roles]
+        # Verifica se tem algum dos cargos de gerente
+        return any(cargo_id in user_roles for cargo_id in CONFIG['cargos_gerente'])
+    return commands.check(predicate)
+
 @bot.command()
-@commands.has_permissions(administrator=True)
+@tem_permissao_acao()
 async def acao(ctx, vagas: int, data: str, hora: str, *, nome_acao: str):
     """Cria uma nova ação: !acao 10 15/12 20:30 Nome da Ação"""
     try:
@@ -499,7 +506,6 @@ async def acao(ctx, vagas: int, data: str, hora: str, *, nome_acao: str):
         embed.add_field(name="📝 Como participar", value="Clique em **✅ Participar** abaixo", inline=False)
         embed.set_footer(text=f"ID: {acao_id} • Criado por {ctx.author.display_name}")
 
-        # View com TODOS os botões desde o início
         view = AcaoView(acao_id)
         mensagem = await ctx.send(embed=embed, view=view)
         
@@ -510,7 +516,7 @@ async def acao(ctx, vagas: int, data: str, hora: str, *, nome_acao: str):
         await ctx.send(f"❌ Erro ao criar ação: {e}")
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@tem_permissao_acao()
 async def fecharacao(ctx, acao_id: str):
     """Fecha uma ação: !fecharacao acao_20231215_203000"""
     if acao_id not in acoes_ativas:
@@ -519,7 +525,6 @@ async def fecharacao(ctx, acao_id: str):
 
     acao = acoes_ativas[acao_id]
     
-    # Cria relatório final
     embed = discord.Embed(
         title=f"📋 RELATÓRIO FINAL - {acao['nome']}",
         color=0xffa500
@@ -530,7 +535,6 @@ async def fecharacao(ctx, acao_id: str):
     embed.add_field(name="✅ Participantes", value=len(acao['participantes']), inline=True)
     embed.add_field(name="🎯 Vagas Ocupadas", value=f"{len(acao['participantes'])}/{acao['vagas']}", inline=True)
 
-    # Lista de participantes
     if acao['participantes']:
         participantes_lista = "\n".join(
             f"• {participante['nome']}" 
@@ -544,10 +548,8 @@ async def fecharacao(ctx, acao_id: str):
 
     await ctx.send(embed=embed)
     
-    # Remove ação
     del acoes_ativas[acao_id]
     
-    # Tenta deletar a mensagem original da ação
     try:
         canal = bot.get_channel(CONFIG['canal_acoes_id'])
         if canal and acao['mensagem_id']:
@@ -557,19 +559,36 @@ async def fecharacao(ctx, acao_id: str):
         pass
 
 @bot.command()
+@tem_permissao_acao()
+async def removerparticipante(ctx, acao_id: str, member: discord.Member):
+    """Remove participante: !removerparticipante acao_123 @user"""
+    if acao_id not in acoes_ativas:
+        await ctx.send("❌ Ação não encontrada.")
+        return
+
+    acao = acoes_ativas[acao_id]
+    
+    if member.id not in acao['participantes']:
+        await ctx.send("❌ Usuário não está nesta ação.")
+        return
+
+    participante = acao['participantes'][member.id]
+    del acao['participantes'][member.id]
+
+    await atualizar_mensagem_acao(acao)
+    await ctx.send(f"✅ **{member.display_name} removido da ação!**")
+
+@bot.command()
 async def hierarquia(ctx):
     """Mostra a hierarquia do servidor: !hierarquia"""
     try:
         guild = ctx.guild
-        
-        # Coleta membros e seus cargos
         membros_hierarquia = {}
         
         for member in guild.members:
             if member.bot:
                 continue
                 
-            # Verifica tags de hierarquia no nickname
             nickname = member.display_name
             hierarquia_encontrada = None
             
@@ -585,15 +604,11 @@ async def hierarquia(ctx):
                 
                 membros_hierarquia[nome_hierarquia].append(member)
 
-        # Ordena hierarquias por ordem de importância
+        # CORREÇÃO: AGRUPAR TODOS OS LÍDERES JUNTOS
         ordem_hierarquia = [
             '👑・LÍDER',
-            '👑・LÍDER',
-            ''👑・LÍDER',
-            '👑・LÍDER',
-            '👑・LÍDER', 
             '💫・SUB LÍDER',
-            '☠️・GERENTE GERAL',
+            '☠️・GERENTE GERAL', 
             '📑・GERENTE RECRUTADOR',
             '🔫・LÍDER ELITE',
             '🔫・GERENTE ELITE',
@@ -609,14 +624,11 @@ async def hierarquia(ctx):
         for hierarquia in ordem_hierarquia:
             if hierarquia in membros_hierarquia:
                 membros = membros_hierarquia[hierarquia]
-                
-                # Ordena membros alfabeticamente
                 membros.sort(key=lambda x: x.display_name.lower())
                 
-                # CORREÇÃO: Mostra os nomes dos membros
                 lista_membros = "\n".join(
                     f"• {member.display_name}" 
-                    for member in membros[:15]  # Limite de 15 por campo
+                    for member in membros[:15]
                 )
                 
                 if len(membros) > 15:
@@ -667,29 +679,9 @@ async def acoesativas(ctx):
 
     await ctx.send(embed=embed)
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def removerparticipante(ctx, acao_id: str, member: discord.Member):
-    """Remove participante: !removerparticipante acao_123 @user"""
-    if acao_id not in acoes_ativas:
-        await ctx.send("❌ Ação não encontrada.")
-        return
-
-    acao = acoes_ativas[acao_id]
-    
-    if member.id not in acao['participantes']:
-        await ctx.send("❌ Usuário não está nesta ação.")
-        return
-
-    participante = acao['participantes'][member.id]
-    del acao['participantes'][member.id]
-
-    await atualizar_mensagem_acao(acao)
-    await ctx.send(f"✅ **{member.display_name} removido da ação!**")
-
 # ========== COMANDOS EXISTENTES ==========
 @bot.command()
-@commands.has_permissions(administrator=True)
+@tem_permissao_acao()
 async def relatorio(ctx, periodo: str = "mensal"):
     """Relatório de recrutamento: !relatorio [mensal|30d|7d|total]"""
     try:
@@ -746,7 +738,7 @@ async def relatorio(ctx, periodo: str = "mensal"):
         await ctx.send(f"❌ Erro: {e}")
 
 @bot.command()
-@commands.has_permissions(administrator=True)
+@tem_permissao_acao()
 async def criarbotao(ctx):
     """Cria botão do formulário: !criarbotao"""
     try:
