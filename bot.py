@@ -37,6 +37,13 @@ hierarquia_roles = {
     '[GA]': '🎯・GERENTE AÇÃO'
 }
 
+# CONFIGURAÇÃO DA HIERARQUIA DA ELITE
+hierarquia_elite_roles = {
+    '[LEL]': '🔫・LÍDER ELITE',
+    '[GE]': '🔫・GERENTE ELITE',
+    '[GA]': '🎯・GERENTE AÇÃO'
+}
+
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=CONFIG['prefixo'], intents=intents)
 
@@ -650,6 +657,76 @@ async def hierarquia(ctx):
         await ctx.send(f"❌ Erro ao gerar hierarquia: {e}")
 
 @bot.command()
+async def hierarquiaelite(ctx):
+    """Mostra a hierarquia da Elite em uma aba separada: !hierarquiaelite"""
+    try:
+        guild = ctx.guild
+        membros_elite = {}
+        
+        for member in guild.members:
+            if member.bot:
+                continue
+                
+            nickname = member.display_name
+            hierarquia_encontrada = None
+            
+            # Procura apenas pelas tags da Elite
+            for tag, nome_hierarquia in hierarquia_elite_roles.items():
+                if tag in nickname:
+                    hierarquia_encontrada = (tag, nome_hierarquia)
+                    break
+            
+            if hierarquia_encontrada:
+                tag, nome_hierarquia = hierarquia_encontrada
+                if nome_hierarquia not in membros_elite:
+                    membros_elite[nome_hierarquia] = []
+                
+                membros_elite[nome_hierarquia].append(member)
+
+        # Ordem específica da hierarquia da Elite
+        ordem_elite = [
+            '🔫・LÍDER ELITE',
+            '🔫・GERENTE ELITE', 
+            '🎯・GERENTE AÇÃO'
+        ]
+        
+        embed = discord.Embed(
+            title="⚔️ HIERARQUIA DA ELITE",
+            description="Organização dos membros da Elite",
+            color=0xff4500  # Cor laranja para diferenciar
+        )
+
+        total_elite = 0
+        
+        for hierarquia in ordem_elite:
+            if hierarquia in membros_elite:
+                membros = membros_elite[hierarquia]
+                membros.sort(key=lambda x: x.display_name.lower())
+                total_elite += len(membros)
+                
+                lista_membros = "\n".join(
+                    f"• {member.display_name}" 
+                    for member in membros[:20]  # Mostra mais membros por categoria
+                )
+                
+                if len(membros) > 20:
+                    lista_membros += f"\n• ... e mais {len(membros) - 20} membros"
+                elif not lista_membros.strip():
+                    lista_membros = "• Nenhum membro nesta categoria"
+                
+                embed.add_field(
+                    name=f"{hierarquia} ({len(membros)})",
+                    value=lista_membros,
+                    inline=False
+                )
+
+        embed.set_footer(text=f"Total de membros da Elite: {total_elite}")
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ Erro ao gerar hierarquia da Elite: {e}")
+
+@bot.command()
 async def acoesativas(ctx):
     """Mostra ações ativas: !acoesativas"""
     if not acoes_ativas:
@@ -780,7 +857,7 @@ async def ajuda(ctx):
     
     embed.add_field(
         name="👤 Comandos Públicos",
-        value="`!ping` `!status` `!ajuda` `!hierarquia` `!acoesativas`",
+        value="`!ping` `!status` `!ajuda` `!hierarquia` `!hierarquiaelite` `!acoesativas`",
         inline=False
     )
     
