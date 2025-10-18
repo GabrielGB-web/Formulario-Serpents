@@ -41,7 +41,8 @@ hierarquia_roles = {
 hierarquia_elite_roles = {
     '[LEL]': '🔫・LÍDER ELITE',
     '[GE]': '🔫・GERENTE ELITE',
-    '[GA]': '🎯・GERENTE AÇÃO'
+    '[GA]': '🎯・GERENTE AÇÃO',
+    '[ELI]': '🤖・ELITE'
 }
 
 intents = discord.Intents.all()
@@ -687,7 +688,8 @@ async def hierarquiaelite(ctx):
         ordem_elite = [
             '🔫・LÍDER ELITE',
             '🔫・GERENTE ELITE', 
-            '🎯・GERENTE AÇÃO'
+            '🎯・GERENTE AÇÃO',
+            '🤖・ELITE'
         ]
         
         embed = discord.Embed(
